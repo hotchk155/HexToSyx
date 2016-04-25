@@ -45,3 +45,11 @@ $RECYCLE.BIN/
 Network Trash Folder
 Temporary Items
 .apdisk
+*.suo
+Debug/HexToSyx.ilk
+*.pdb
+HexToSyx.VC.db
+*.log
+*.tlog
+*.obj
+HexToSyx/Debug/vc140.idb
