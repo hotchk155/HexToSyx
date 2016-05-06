@@ -72,10 +72,18 @@ multiple blocks of the following format
 #define SYSEX_START	0xF0
 #define SYSEX_ID0	0x00
 #define SYSEX_ID1	0x7F
-#define SYSEX_ID2	0x11
+#define SYSEX_ID2	0x12
 #define SYSEX_END	0xF7
 
+#define MEMORY_SIZE (8 * 2 * 1024)
+
+
 #define MAX_LINE 1000
+
+typedef unsigned char byte;
+byte memory[MEMORY_SIZE];
+
+
 
 char from_hex(char in) {
 	switch (toupper(in)) {
@@ -98,7 +106,9 @@ char from_hex(char in) {
 	}
 	return 0;
 }
-bool process_file(FILE *infile, FILE *outfile)
+
+
+bool read_hex(FILE *infile, unsigned int *max_addr)
 {
 	int line = 0; // line number (for error message)
 	int msg_sequence = 0; // sequence number for sysex message
@@ -134,7 +144,7 @@ bool process_file(FILE *infile, FILE *outfile)
 		}
 
 		// check for record type 0
-		if (buf[6] != '0' || buf[7] != '0') { 
+		if (buf[7] != '0' || buf[8] != '0') {
 			continue;
 		}
 
@@ -145,40 +155,102 @@ bool process_file(FILE *infile, FILE *outfile)
 			return false;
 		}
 
+		// form the base address
+		unsigned int addr = from_hex(buf[3]);
+		addr <<= 4;
+		addr |= from_hex(buf[4]);
+		addr <<= 4;
+		addr |= from_hex(buf[5]);
+		addr <<= 4;
+		addr |= from_hex(buf[6]);
+
+		if (addr + 2 * data_len >= MEMORY_SIZE) {
+			printf("Hex file error - out of memory at line %d\n", line);
+			return false;
+		}
+
+		// copy the data into the memory buffer
+		int data_pos = 9;
+		unsigned int data;
+		for (int i = 0; i < data_len; ++i) {
+			data = from_hex(buf[data_pos++]);
+			data <<= 4;
+			data |= from_hex(buf[data_pos++]);
+			memory[addr++] = data;
+			if (*max_addr < addr) {
+				*max_addr = addr;
+			}
+		}
+	}
+	return true;
+}
+
+bool write_sysex(FILE *outfile, unsigned int max_addr)
+{
+	int msg_sequence = 1;
+	unsigned int addr = 0;
+	while (addr < max_addr) {
 		// write record to sysex
 		fputc(SYSEX_START, outfile);		// } start tag
 		fputc(SYSEX_ID0, outfile);			// } manufacturer id
 		fputc(SYSEX_ID1, outfile);			// }
 		fputc(SYSEX_ID2, outfile);			// }
 		fputc(msg_sequence, outfile);		// sequence number
-		fputc(from_hex(buf[1]), outfile);	// } number of data bytes
-		fputc(from_hex(buf[2]), outfile);	// }
-		fputc(from_hex(buf[3]), outfile);	// } address
-		fputc(from_hex(buf[4]), outfile);	// }
-		fputc(from_hex(buf[5]), outfile);	// }
-		fputc(from_hex(buf[6]), outfile);	// }
-		int data_pos = 9;
-		for (int i = 0; i < data_len; ++i) {
-			fputc(from_hex(buf[data_pos++]), outfile);
-			fputc(from_hex(buf[data_pos++]), outfile);
+		for (int i = 0; i < 32; ++i) { // 32 words
+			unsigned int word = (unsigned int)memory[addr+1] << 8 | memory[addr]; // little endian
+			word &= 0x3FFF;
+			fputc((word>>7), outfile);	
+			fputc((word & 0x7F), outfile);	 
+			addr += 2;
+			//if (!(i % 8)) printf("\n");
+			//printf("%04x ", word);
 		}
 		fputc(SYSEX_END, outfile);			// } end tag
 
 		// advance the sequence number
-		++msg_sequence;
-		msg_sequence &= 0x7F;
+		if (++msg_sequence > 0x7F)
+			msg_sequence = 1;
 	}
+
+	// End marker
+	fputc(SYSEX_START, outfile);	
+	fputc(SYSEX_ID0, outfile);		
+	fputc(SYSEX_ID1, outfile);		
+	fputc(SYSEX_ID2, outfile);		
+	fputc(0x00, outfile);		// sequence value 0 marks end of data
+	for (int i = 0; i < 32; ++i) {
+		fputc(0x00, outfile);
+		fputc(0x00, outfile);
+	}
+	fputc(SYSEX_END, outfile);		
+
+	return true;
+
+}
+
+bool process_file(FILE *infile, FILE *outfile)
+{
+	// start by clearing all the memory
+	memset(memory, 0xFF, sizeof(memory));
+	unsigned int max_addr = 0;
+	if (!read_hex(infile, &max_addr)) {
+		return false;
+	}
+	return write_sysex(outfile, max_addr);
 }
 
 int main(int argc, char *argv[])
 {
-	if(argc)
-	FILE * infile = fopen("c:\\temp\\test.hex", "rt");
+	if (argc != 2) {
+		printf("Use: hex2syx <input.hex> <output.syx>\n");
+		exit(1);
+	}
+	FILE * infile = fopen(argv[1], "rt");
 	if (!infile) {
 		printf("input file not found\n");
 		exit(1);
 	}
-	FILE * outfile = fopen("c:\\temp\\test.syx", "wb");
+	FILE * outfile = fopen(argv[2], "wb");
 	if (!outfile) {
 		printf("cannot open output file\n");
 		exit(2);
