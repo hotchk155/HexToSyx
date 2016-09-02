@@ -72,7 +72,6 @@ multiple blocks of the following format
 #define SYSEX_START	0xF0
 #define SYSEX_ID0	0x00
 #define SYSEX_ID1	0x7F
-#define SYSEX_ID2	0x12
 #define SYSEX_END	0xF7
 
 #define MEMORY_SIZE (8 * 2 * 1024)
@@ -83,6 +82,8 @@ multiple blocks of the following format
 typedef unsigned char byte;
 byte memory[MEMORY_SIZE];
 
+int product_id = 0;
+int block_size = 32;
 
 
 char from_hex(char in) {
@@ -112,6 +113,7 @@ bool read_hex(FILE *infile, unsigned int *max_addr)
 {
 	int line = 0; // line number (for error message)
 	int msg_sequence = 0; // sequence number for sysex message
+	unsigned int offset = 0;
 
 	// loop through the input file
 	while (!feof(infile)) {
@@ -143,11 +145,6 @@ bool read_hex(FILE *infile, unsigned int *max_addr)
 			return false;
 		}
 
-		// check for record type 0
-		if (buf[7] != '0' || buf[8] != '0') {
-			continue;
-		}
-
 		// check that the declared data length matches the line length
 		int data_len = 16 * from_hex(buf[1]) + from_hex(buf[2]);
 		if (2 * data_len + 11 != line_len) { // remembering :
@@ -155,30 +152,77 @@ bool read_hex(FILE *infile, unsigned int *max_addr)
 			return false;
 		}
 
-		// form the base address
-		unsigned int addr = from_hex(buf[3]);
-		addr <<= 4;
-		addr |= from_hex(buf[4]);
-		addr <<= 4;
-		addr |= from_hex(buf[5]);
-		addr <<= 4;
-		addr |= from_hex(buf[6]);
-
-		if (addr + 2 * data_len >= MEMORY_SIZE) {
-			printf("Hex file error - out of memory at line %d\n", line);
+		// 01 - END OF FILE
+		if (buf[7] == '0' && buf[8] == '1') {
+			break;
+		}
+		// 02 - EXTENDED SEGMENT ADDRESS
+		else if (buf[7] == '0' && buf[8] == '2') {
+			printf("Hex file error - extended segment address (02) record not supported, line %d\n", line);
 			return false;
 		}
+		// 03 - START SEGMENT ADDRESS
+		else if (buf[7] == '0' && buf[8] == '3') {
+			printf("Hex file error - start segment address (03) record not supported, line %d\n", line);
+			return false;
+		}
+		// 04 - EXTENDED LINEAR ADDRESS
+		else if (buf[7] == '0' && buf[8] == '4') {
+			if (line_len != 15 ) {
+				printf("Hex file error - invalid linear address record line %d\n", line);
+				return false;
+			}
 
-		// copy the data into the memory buffer
-		int data_pos = 9;
-		unsigned int data;
-		for (int i = 0; i < data_len; ++i) {
-			data = from_hex(buf[data_pos++]);
-			data <<= 4;
-			data |= from_hex(buf[data_pos++]);
-			memory[addr++] = data;
-			if (*max_addr < addr) {
-				*max_addr = addr;
+			// form the offset
+			offset = from_hex(buf[9]);
+			offset <<= 4;
+			offset |= from_hex(buf[10]);
+			offset <<= 4;
+			offset |= from_hex(buf[11]);
+			offset <<= 4;
+			offset |= from_hex(buf[12]);
+			offset <<= 16;
+			printf("-Linear address offset %x from line  %d\n", offset, line);
+		}
+		// 05 - START LINEAR ADDRESS
+		else if (buf[7] == '0' && buf[8] == '5') {
+			printf("Hex file error - start segment address (05) record not supported, line %d\n", line);
+			return false;
+		}
+		else if (buf[7] != '0' || buf[8] != '0') {
+			printf("Hex file error - unknown record type, line %d\n", line);
+			return false;
+		}
+		// 00 - DATA
+		else {
+
+			// form the base address
+			unsigned int addr = from_hex(buf[3]);
+			addr <<= 4;
+			addr |= from_hex(buf[4]);
+			addr <<= 4;
+			addr |= from_hex(buf[5]);
+			addr <<= 4;
+			addr |= from_hex(buf[6]);
+
+			addr += offset;
+
+			if (addr + 2 * data_len >= MEMORY_SIZE) {
+				printf("Warning: address %x out of range at line %d\n", addr, line);
+				continue;
+			}
+
+			// copy the data into the memory buffer
+			int data_pos = 9;
+			unsigned int data;
+			for (int i = 0; i < data_len; ++i) {
+				data = from_hex(buf[data_pos++]);
+				data <<= 4;
+				data |= from_hex(buf[data_pos++]);
+				memory[addr++] = data;
+				if (*max_addr < addr) {
+					*max_addr = addr;
+				}
 			}
 		}
 	}
@@ -194,9 +238,9 @@ bool write_sysex(FILE *outfile, unsigned int max_addr)
 		fputc(SYSEX_START, outfile);		// } start tag
 		fputc(SYSEX_ID0, outfile);			// } manufacturer id
 		fputc(SYSEX_ID1, outfile);			// }
-		fputc(SYSEX_ID2, outfile);			// }
+		fputc(product_id, outfile);			// }
 		fputc(msg_sequence, outfile);		// sequence number
-		for (int i = 0; i < 32; ++i) { // 32 words
+		for (int i = 0; i < block_size; ++i) { //  words
 			unsigned int word = (unsigned int)memory[addr+1] << 8 | memory[addr]; // little endian
 			word &= 0x3FFF;
 			fputc((word>>7), outfile);	
@@ -216,9 +260,9 @@ bool write_sysex(FILE *outfile, unsigned int max_addr)
 	fputc(SYSEX_START, outfile);	
 	fputc(SYSEX_ID0, outfile);		
 	fputc(SYSEX_ID1, outfile);		
-	fputc(SYSEX_ID2, outfile);		
+	fputc(product_id, outfile);		
 	fputc(0x00, outfile);		// sequence value 0 marks end of data
-	for (int i = 0; i < 32; ++i) {
+	for (int i = 0; i < block_size; ++i) {
 		fputc(0x00, outfile);
 		fputc(0x00, outfile);
 	}
@@ -241,19 +285,38 @@ bool process_file(FILE *infile, FILE *outfile)
 
 int main(int argc, char *argv[])
 {
-	if (argc != 3) {
-		printf("Use: hex2syx <input.hex> <output.syx>\n");
+	if (argc != 4) {
+		printf("Use: hex2syx <id> <input.hex> <output.syx>\n"
+			"[a] cv.ocd\n"
+			"[b] synchole\n"
+		);
 		exit(1);
 	}
-	FILE * infile = fopen(argv[1], "rt");
+	switch (*argv[1]) {
+	case 'a':
+		printf("CV.OCD\n");
+		product_id = 0x12;
+		block_size = 32;
+		break;
+	case 'b':
+		printf("Synchole\n");
+		product_id = 0x14;
+		block_size = 16;
+		break;
+	default:
+		printf("invalid product id\n");
+		exit(2);
+	}
+	
+	FILE * infile = fopen(argv[2], "rt");
 	if (!infile) {
 		printf("input file not found\n");
-		exit(1);
+		exit(3);
 	}
-	FILE * outfile = fopen(argv[2], "wb");
+	FILE * outfile = fopen(argv[3], "wb");
 	if (!outfile) {
 		printf("cannot open output file\n");
-		exit(2);
+		exit(4);
 	}
 	if (process_file(infile, outfile)) {
 		printf("done\n");
