@@ -289,6 +289,9 @@ int main(int argc, char *argv[])
 		printf("Use: hex2syx <id> <input.hex> <output.syx>\n"
 			"[a] cv.ocd\n"
 			"[b] synchole\n"
+			"[c] orange squeeze\n"
+			"[d] midi switcher (original)\n"
+			"[e] midi hub\n"
 		);
 		exit(1);
 	}
@@ -302,6 +305,21 @@ int main(int argc, char *argv[])
 		printf("Synchole\n");
 		product_id = 0x14;
 		block_size = 16;
+		break;
+	case 'c':
+		printf("Orange Squeeze\n");
+		product_id = 0x13;
+		block_size = 32;
+		break;
+	case 'd':
+		printf("MIDI Switcher (Original)\n");
+		product_id = 0x16;
+		block_size = 32;
+		break;
+	case 'e':
+		printf("MIDI Hub\n");
+		product_id = 0x17;
+		block_size = 32;
 		break;
 	default:
 		printf("invalid product id\n");
