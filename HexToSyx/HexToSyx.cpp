@@ -293,6 +293,8 @@ int main(int argc, char *argv[])
 			"[d] midi switcher (original)\n"
 			"[e] midi hub\n"
 			"[f] mini midi switcher smt\n"
+			"[g] MIDIWALL\n"
+			"[h] Relays Switcher\n"
 		);
 		exit(1);
 	}
@@ -325,6 +327,16 @@ int main(int argc, char *argv[])
 	case 'f':
 		printf("Mini MIDI Switcher (SMT transistor)\n");
 		product_id = 0x20;
+		block_size = 32;
+		break;
+	case 'g':
+		printf("MIDIWALL\n");
+		product_id = 0x22;
+		block_size = 16;
+		break;
+	case 'h':
+		printf("Relay Switcher\n");
+		product_id = 0x23;
 		block_size = 32;
 		break;
 	default:
